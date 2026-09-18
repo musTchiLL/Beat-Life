@@ -371,10 +371,19 @@
           <button id="clearBtn">クリア</button>
         </div>
       </div>
+
+      <div class="ctrl-block full">
+        <div class="ctrl-label">テーマ（音色・スケール・グルーヴが変わります）</div>
+        <div class="seg" id="themeGroup">
+          <button data-val="original" aria-pressed="true">オリジナル</button>
+          <button data-val="techno" aria-pressed="false">テクノ</button>
+          <button data-val="jazz" aria-pressed="false">ジャズ</button>
+        </div>
+      </div>
     </div>
 
     <footer>
-      マスをクリック（またはドラッグ）してON/OFFを描けます。ONにした瞬間に音がプレビュー再生されます。▶ 再生 を押すと、選んだ拍の刻みでライフゲームが自動的に世代交代し、新しく誕生したマスの音が鳴ります。列ごとに楽器（キック・ハイハット・シンセ・スネア）、行ごとに音の高さが決まっています。
+      マスをクリック（またはドラッグ）してON/OFFを描けます。ONにした瞬間に音がプレビュー再生されます。▶ 再生 を押すと、選んだ拍の刻みでライフゲームが自動的に世代交代し、新しく誕生したマスの音が鳴ります。列ごとに楽器（キック・ハイハット・シンセ・スネア）、行ごとに音の高さが決まっています。下部の「テーマ」で音色・使用スケール・グルーヴ（ジャズはスウィング）が切り替わります。
     </footer>
   </div>
 </div>
@@ -384,8 +393,42 @@
   "use strict";
 
   const COLS = 16, ROWS = 12;
-  const SCALE = ["C3","Eb3","F3","G3","Bb3","C4","Eb4","F4","G4","Bb4","C5","Eb5"];
   const GROUP_COLORS_VAR = ['--kick','--hat','--lead','--snare'];
+
+  const THEMES = {
+    original: {
+      label: "オリジナル",
+      scale: ["C3","Eb3","F3","G3","Bb3","C4","Eb4","F4","G4","Bb4","C5","Eb5"],
+      swing: 0, swingSubdivision: "8n",
+      kick: { pitchDecay:0.02, octaves:3, envelope:{attack:0.001, decay:0.35, sustain:0, release:0.4} },
+      hat:  { envelope:{attack:0.001, decay:0.12, release:0.02}, harmonicity:5.1, modulationIndex:24, resonance:3500, octaves:1.2, volume:-8 },
+      lead: { oscillator:{type:"triangle"}, envelope:{attack:0.005, decay:0.25, sustain:0.05, release:0.4} },
+      snareFilterFreq: 1600,
+      snare: { noise:{type:"white"}, envelope:{attack:0.001, decay:0.18, sustain:0} }
+    },
+    techno: {
+      label: "テクノ",
+      scale: ["C2","D2","Eb2","F2","G2","Ab2","Bb2","C3","D3","Eb3","F3","G3"],
+      swing: 0, swingSubdivision: "8n",
+      kick: { pitchDecay:0.04, octaves:5, envelope:{attack:0.001, decay:0.28, sustain:0, release:0.15} },
+      hat:  { envelope:{attack:0.001, decay:0.06, release:0.01}, harmonicity:7.1, modulationIndex:40, resonance:5200, octaves:1.5, volume:-6 },
+      lead: { oscillator:{type:"sawtooth"}, envelope:{attack:0.002, decay:0.12, sustain:0, release:0.08} },
+      snareFilterFreq: 2200,
+      snare: { noise:{type:"white"}, envelope:{attack:0.001, decay:0.09, sustain:0} }
+    },
+    jazz: {
+      label: "ジャズ",
+      scale: ["C3","D3","Eb3","G3","A3","C4","D4","Eb4","G4","A4","C5","D5"],
+      swing: 0.55, swingSubdivision: "8n",
+      kick: { pitchDecay:0.01, octaves:2, envelope:{attack:0.005, decay:0.5, sustain:0, release:0.6} },
+      hat:  { envelope:{attack:0.001, decay:0.2, release:0.05}, harmonicity:3.2, modulationIndex:12, resonance:2200, octaves:1.0, volume:-14 },
+      lead: { oscillator:{type:"sine"}, envelope:{attack:0.01, decay:0.4, sustain:0.15, release:0.6} },
+      snareFilterFreq: 900,
+      snare: { noise:{type:"pink"}, envelope:{attack:0.002, decay:0.3, sustain:0} }
+    }
+  };
+
+  let currentThemeKey = "original";
 
   function makeEmptyGrid(){
     return Array.from({length:ROWS}, () => new Array(COLS).fill(0));
@@ -400,43 +443,50 @@
   let desiredVolumeDb = -10;
   let flashes = [];
 
-  let kick, hat, lead, snare;
+  let kick, hat, lead, snare, snareFilter;
 
   function mapVolume(v){ return -40 + (v/100)*40; }
+
+  function disposeSynths(){
+    [kick, hat, lead, snare, snareFilter].forEach(function(node){
+      if(node) node.dispose();
+    });
+    kick = hat = lead = snare = snareFilter = null;
+  }
+
+  function buildSynths(themeKey){
+    const t = THEMES[themeKey];
+    disposeSynths();
+    kick = new Tone.MembraneSynth(t.kick).toDestination();
+    hat = new Tone.MetalSynth(t.hat).toDestination();
+    hat.volume.value = t.hat.volume;
+    lead = new Tone.Synth(t.lead).toDestination();
+    snareFilter = new Tone.Filter(t.snareFilterFreq, "bandpass").toDestination();
+    snare = new Tone.NoiseSynth(t.snare);
+    snare.connect(snareFilter);
+    Tone.Transport.swing = t.swing;
+    Tone.Transport.swingSubdivision = t.swingSubdivision;
+  }
 
   function ensureAudio(){
     if(audioReady) return Promise.resolve();
     return Tone.start().then(function(){
-      kick = new Tone.MembraneSynth({
-        pitchDecay:0.02, octaves:3,
-        envelope:{attack:0.001, decay:0.35, sustain:0, release:0.4}
-      }).toDestination();
-
-      hat = new Tone.MetalSynth({
-        envelope:{attack:0.001, decay:0.12, release:0.02},
-        harmonicity:5.1, modulationIndex:24, resonance:3500, octaves:1.2
-      }).toDestination();
-      hat.volume.value = -8;
-
-      lead = new Tone.Synth({
-        oscillator:{type:"triangle"},
-        envelope:{attack:0.005, decay:0.25, sustain:0.05, release:0.4}
-      }).toDestination();
-
-      const snareFilter = new Tone.Filter(1600, "bandpass").toDestination();
-      snare = new Tone.NoiseSynth({
-        noise:{type:"white"},
-        envelope:{attack:0.001, decay:0.18, sustain:0}
-      });
-      snare.connect(snareFilter);
-
+      buildSynths(currentThemeKey);
       Tone.getDestination().volume.value = desiredVolumeDb;
       audioReady = true;
     });
   }
 
+  function setTheme(themeKey){
+    currentThemeKey = themeKey;
+    if(audioReady){
+      buildSynths(themeKey);
+      Tone.getDestination().volume.value = desiredVolumeDb;
+    }
+  }
+
   function noteForRow(r){
-    return SCALE[ROWS-1-r];
+    return THEMES[currentThemeKey].scale[ROWS-1-r];
   }
   function groupForCol(c){
     return c % 4;
@@ -498,9 +548,12 @@
       Tone.Transport.clear(repeatId);
       repeatId = null;
     }
+    // Start from the current transport position (not from time 0) so switching
+    // subdivisions mid-playback doesn't wait for the next "global" grid boundary.
+    const startAt = running ? Tone.Transport.seconds : 0;
     repeatId = Tone.Transport.scheduleRepeat(function(time){
       stepGeneration(time);
-    }, subdivision);
+    }, subdivision, startAt);
   }
 
   // ---- DOM controls ----
@@ -577,6 +630,15 @@
     Array.from(subdivGroup.children).forEach(function(b){ b.setAttribute('aria-pressed', 'false'); });
     btn.setAttribute('aria-pressed', 'true');
     setSubdivision(btn.dataset.val);
+  });
+
+  const themeGroup = document.getElementById('themeGroup');
+  themeGroup.addEventListener('click', function(e){
+    const btn = e.target.closest('button');
+    if(!btn) return;
+    Array.from(themeGroup.children).forEach(function(b){ b.setAttribute('aria-pressed', 'false'); });
+    btn.setAttribute('aria-pressed', 'true');
+    setTheme(btn.dataset.val);
   });
 
   themeToggle.addEventListener('click', function(){
