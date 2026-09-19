@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Beat Life</title>
+  <style>
+    :root{--bg:#12141c;--panel:#1d2030;--line:#363b51;--text:#f1f3ff;--muted:#aeb5cc;--dead:#292d3d}
+    *{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#20243a,#11131a 58%);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
+    main{width:min(900px,100%);margin:auto;padding:28px 14px 44px}h1{margin:0;font-size:clamp(30px,7vw,50px);letter-spacing:.04em}.sub{margin:5px 0 22px;color:var(--muted)}
+    .panel{padding:18px;border:1px solid var(--line);border-radius:18px;background:rgba(29,32,48,.95);box-shadow:0 18px 48px #0006}.controls{display:grid;grid-template-columns:1.2fr 1fr 1fr 1.35fr;gap:14px;align-items:end;margin-bottom:14px}.control label{display:block;font-size:12px;color:var(--muted);margin-bottom:7px}input,select,button{font:inherit}input,select{width:100%}input[type=range]{accent-color:#9eb0ff}select{background:#282c40;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px}
+    .actions{display:flex;flex-wrap:wrap;gap:8px;margin:5px 0 15px}button{padding:9px 12px;border-radius:8px;border:1px solid #6678c9;background:#394777;color:white;font-weight:700;cursor:pointer}button:hover{background:#4c5d9b}button.subtle{background:#292d40;border-color:var(--line);font-weight:600}.status{min-height:21px;font-size:13px;color:var(--muted)}.status b{color:#fff09b}
+    .legend{display:flex;flex-wrap:wrap;gap:7px;margin:14px 0 10px}.chip{font-size:11px;color:var(--muted);border:1px solid var(--line);background:#272b3e;border-radius:99px;padding:4px 7px}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:0}
+    #grid{display:grid;grid-template-columns:repeat(21,1fr);gap:4px;touch-action:none;user-select:none}.cell{appearance:none;aspect-ratio:1;min-width:0;padding:0;border:1px solid #373b4e;border-radius:4px;background:var(--dead);transition:background .08s,transform .08s}.cell:hover{border-color:#e7eaff}.cell.live{background:var(--lane);border-color:#fff;box-shadow:0 0 8px var(--lane)}.cell.born{transform:scale(.88);box-shadow:0 0 18px var(--lane)}
+    .help{color:var(--muted);font-size:13px;line-height:1.65;margin:15px 2px 0}@media(max-width:600px){main{padding:20px 10px}.panel{padding:12px}.controls{grid-template-columns:1fr 1fr}#grid{gap:3px}.cell{border-radius:3px}}
+  </style>
+</head>
+<body>
+<main>
+  <h1>BEAT LIFE</h1>
+  <p class="sub">リズム × ライフゲーム</p>
+  <section class="panel">
+    <div class="controls">
+      <div class="control"><label for="bpm">BPM <b id="bpmNumber">110</b></label><input id="bpm" type="range" min="60" max="180" value="110"></div>
+      <div class="control"><label for="rhythm">盤面更新リズム</label><select id="rhythm"><option value="steady">均等（4分ごと）</option><option value="alternate">交互（8分→4分）</option><option value="shortShortLong">短・短・長</option><option value="tresillo">3-3-2</option></select></div>
+      <div class="control"><label for="volume">音量</label><input id="volume" type="range" min="0" max="100" value="45"></div>
+      <div class="control"><label for="preset">プリセット</label><select id="preset"><option value="chaos">カオス・ガーデン</option><option value="gliders">グライダー・パレード</option><option value="oscillators">オシレーター・ラボ</option><option value="pentadecathlon">ペンタデカスロン</option><option value="collision">衝突コース</option></select></div>
+    </div>
+    <div class="actions"><button id="play">▶ 再生</button><button id="next" class="subtle">次の世代</button><button id="applyPreset" class="subtle">プリセットを配置</button><button id="random" class="subtle">ランダム</button><button id="clear" class="subtle">クリア</button></div>
+    <div class="status"><span id="message">盤面を編集するか、「デモ配置」を押してください。</span> 世代 <b id="generation">0</b></div>
+    <div class="legend" id="legend"></div>
+    <div id="grid" aria-label="ライフゲームの盤面"></div>
+    <p class="help">再生中は、選んだリズムに合わせてライフゲームが1世代ずつ進みます。盤面の上下・左右はつながっています。</p>
+  </section>
+</main>
+<script>
+(() => {
+  'use strict';
+  // 縦16 × 横21 は互いに素。トーラス上のグライダーが元の軌道へ戻る周期を長く保てる。
+  const ROWS=16, COLS=21, MAX_SOUNDS=20;
+  const LANES=[
+    {name:'キック',color:'#ff746c',kind:'kick'}, {name:'ハット',color:'#f7ca63',kind:'hat'},
+    {name:'クラップ',color:'#ff9d69',kind:'clap'}, {name:'ベース',color:'#b393f5',kind:'bass'},
+    {name:'ブリップ',color:'#64d9bd',kind:'blip'}, {name:'チャイム',color:'#8babff',kind:'chime'}
+  ];
+  // 値は4分音符を1とした、世代更新までの長さ。音ではなく盤面の変化をリズム化する。
+  const UPDATE_RHYTHMS={
+    steady:{intervals:[1]},
+    alternate:{intervals:[.5,1]},
+    shortShortLong:{intervals:[.5,.5,1]},
+    tresillo:{intervals:[.75,.75,.5]}
+  };
+  const SHAPES={
+    glider:[[0,1],[1,2],[2,0],[2,1],[2,2]],
+    rPentomino:[[0,1],[0,2],[1,0],[1,1],[2,1]],
+    acorn:[[0,1],[1,3],[2,0],[2,1],[2,4],[2,5],[2,6]],
+    blinker:[[0,0],[0,1],[0,2]],
+    toad:[[0,1],[0,2],[0,3],[1,0],[1,1],[1,2]],
+    beacon:[[0,0],[0,1],[1,0],[1,1],[2,2],[2,3],[3,2],[3,3]],
+    // 原型の3×10形。縦向きより盤面上の余白を取りやすい。
+    pentadecathlon:[[0,2],[0,7],[1,0],[1,1],[1,3],[1,4],[1,5],[1,6],[1,8],[1,9],[2,2],[2,7]],
+    // Life Lexicon の Clock II（p4）初期世代。12×12 の「billiard table」型振動子。
+    clockII:[[0,6],[0,7],[1,6],[1,7],[3,4],[3,5],[3,6],[3,7],[4,0],[4,1],[4,3],[4,8],[5,0],[5,1],[5,3],[5,6],[5,8],[6,3],[6,6],[6,8],[6,10],[6,11],[7,3],[7,5],[7,8],[7,10],[7,11],[8,4],[8,5],[8,6],[8,7],[10,4],[10,5],[11,4],[11,5]]
+  };
+  const NOTES=[130.81,146.83,155.56,174.61,196,220,233.08,261.63,293.66,329.63,349.23,392];
+  let cells=emptyBoard(), generation=0, running=false, rhythmPosition=0, timer=null, drawing=false, drawValue=true;
+  let audio=null, master=null, noiseBuffer=null;
+  const gridEl=document.querySelector('#grid'), generationEl=document.querySelector('#generation'), messageEl=document.querySelector('#message');
+  const bpmEl=document.querySelector('#bpm'), bpmNumber=document.querySelector('#bpmNumber'), rhythmEl=document.querySelector('#rhythm'), volumeEl=document.querySelector('#volume'), presetEl=document.querySelector('#preset'), playEl=document.querySelector('#play');
+
+  function emptyBoard(){return Array.from({length:ROWS},()=>Array(COLS).fill(false));}
+  function laneAt(c){return LANES[c%LANES.length];}
+  function noteForRow(row){
+    const position=(ROWS-1-row)/(ROWS-1);
+    return NOTES[Math.round(position*(NOTES.length-1))];
+  }
+  function rotate(shape){const height=Math.max(...shape.map(p=>p[0]));return shape.map(([r,c])=>[c,height-r]);}
+  function stamp(board,row,col,shape,turns=0){
+    let points=shape;for(let i=0;i<turns;i++)points=rotate(points);
+    points.forEach(([r,c])=>{const rr=row+r,cc=col+c;if(rr>=0&&rr<ROWS&&cc>=0&&cc<COLS)board[rr][cc]=true;});
+  }
+  const PRESETS={
+    chaos:{message:'Rペントミノとドングリを十分離した、発散しやすいカオス配置。',apply(board){stamp(board,3,3,SHAPES.rPentomino);stamp(board,7,12,SHAPES.acorn);stamp(board,11,2,SHAPES.glider);}},
+    gliders:{message:'4つのグライダーが並走。',apply(board){stamp(board,1,1,SHAPES.glider);stamp(board,1,7,SHAPES.glider);stamp(board,1,13,SHAPES.glider);stamp(board,8,4,SHAPES.glider);}},
+    oscillators:{message:'Clock II（p4）、ブリンカー、トード、ビーコンを観察できます。',apply(board){stamp(board,1,1,SHAPES.clockII);stamp(board,14,1,SHAPES.blinker);stamp(board,12,16,SHAPES.toad);stamp(board,1,15,SHAPES.beacon);}},
+    pentadecathlon:{message:'ペンタデカスロン',apply(board){stamp(board,6,6,SHAPES.pentadecathlon);}},
+    collision:{message:'グライダーと振動子が干渉する実験配置。',apply(board){stamp(board,2,2,SHAPES.glider);stamp(board,10,15,SHAPES.glider,2);stamp(board,6,9,SHAPES.toad);stamp(board,12,4,SHAPES.blinker,1);}}
+  };
+  function createGrid(){
+    const fragment=document.createDocumentFragment();
+    for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+      const b=document.createElement('button');b.type='button';b.className='cell';b.dataset.row=r;b.dataset.col=c;
+      b.addEventListener('pointerdown',event=>{event.preventDefault();drawing=true;drawValue=!cells[r][c];setCell(r,c,drawValue,true);});
+      b.addEventListener('pointerenter',()=>{if(drawing)setCell(r,c,drawValue,false);});fragment.appendChild(b);
+    }
+    gridEl.appendChild(fragment);
+  }
+  function render(births=[]){
+    const born=new Set(births.map(([r,c])=>r+','+c));
+    gridEl.querySelectorAll('.cell').forEach((el,index)=>{
+      const r=Math.floor(index/COLS),c=index%COLS;el.style.setProperty('--lane',laneAt(c).color);
+      el.className='cell'+(cells[r][c]?' live':'')+(born.has(r+','+c)?' born':'');
+      el.setAttribute('aria-label',`行${r+1} 列${c+1} ${cells[r][c]?'生存':'死滅'}`);
+    });
+    generationEl.textContent=generation;
+  }
+  function setCell(r,c,value,preview){if(cells[r][c]===value)return;cells[r][c]=value;render();if(value&&preview){ensureAudio().then(()=>triggerCell(r,c,.7));}}
+  function neighborCount(board,r,c){
+    let total=0;
+    for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+      if(dr===0&&dc===0)continue;
+      // 端を越えた座標は反対側に戻す（上下・左右がつながった盤面）。
+      const rr=(r+dr+ROWS)%ROWS,cc=(c+dc+COLS)%COLS;
+      if(board[rr][cc])total++;
+    }
+    return total;
+  }
+  function nextGeneration(withSound){
+    const next=emptyBoard(),births=[];
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+      const n=neighborCount(cells,r,c);next[r][c]=cells[r][c]?(n===2||n===3):n===3;
+      if(next[r][c]&&!cells[r][c])births.push([r,c]);
+    }
+    cells=next;generation++;render(births);
+    if(withSound&&audio)births.slice(0,MAX_SOUNDS).forEach(([r,c],i)=>{
+      // 音声の不具合でライフゲームの更新自体が止まらないよう切り離す。
+      try{triggerCell(r,c,.5+(i%4)*.1);}catch(error){console.warn('Sound skipped',error);}
+    });
+  }
+  function loadPreset(key){
+    const preset=PRESETS[key];
+    cells=emptyBoard();preset.apply(cells);generation=0;render();messageEl.textContent=preset.message;
+  }
+  function randomize(){cells=emptyBoard();for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)cells[r][c]=Math.random()<.27;generation=0;render();}
+  function ensureAudio(){
+    if(audio)return audio.resume();
+    const Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx)return Promise.resolve();
+    audio=new Ctx();master=audio.createGain();master.gain.value=Number(volumeEl.value)/100*.35;master.connect(audio.destination);
+    noiseBuffer=audio.createBuffer(1,Math.ceil(audio.sampleRate*.25),audio.sampleRate);const data=noiseBuffer.getChannelData(0);for(let i=0;i<data.length;i++)data[i]=Math.random()*2-1;
+    return audio.resume();
+  }
+  function oscillator(freq,duration,type,level,drop=0){
+    if(!audio)return;const t=audio.currentTime,osc=audio.createOscillator(),gain=audio.createGain();osc.type=type;osc.frequency.setValueAtTime(freq,t);if(drop)osc.frequency.exponentialRampToValueAtTime(Math.max(25,freq-drop),t+duration);gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(level,t+.005);gain.gain.exponentialRampToValueAtTime(.0001,t+duration);osc.connect(gain).connect(master);osc.start(t);osc.stop(t+duration+.02);
+  }
+  function noise(duration,level,filterFrequency){
+    if(!audio)return;const t=audio.currentTime,src=audio.createBufferSource(),filter=audio.createBiquadFilter(),gain=audio.createGain();src.buffer=noiseBuffer;filter.type='bandpass';filter.frequency.value=filterFrequency;filter.Q.value=.8;gain.gain.setValueAtTime(level,t);gain.gain.exponentialRampToValueAtTime(.0001,t+duration);src.connect(filter).connect(gain).connect(master);src.start(t);src.stop(t+duration+.02);
+  }
+  function triggerCell(r,c,velocity=.65){
+    const kind=laneAt(c).kind,note=noteForRow(r);
+    if(kind==='kick')oscillator(130,.16,'sine',velocity*.6,82);
+    else if(kind==='hat')noise(.045,velocity*.16,7000+(ROWS-r)*230);
+    else if(kind==='clap'){noise(.11,velocity*.18,1500);window.setTimeout(()=>noise(.06,velocity*.09,1800),13);}
+    else if(kind==='bass')oscillator(note/2,.17,'square',velocity*.14);
+    else if(kind==='blip')oscillator(note,.09,'triangle',velocity*.12);
+    else {oscillator(note*2,.3,'sine',velocity*.08);oscillator(note*3,.18,'sine',velocity*.035);}
+  }
+  function scheduleNextGeneration(){
+    if(!running)return;
+    const rhythm=UPDATE_RHYTHMS[rhythmEl.value];
+    const beats=rhythm.intervals[rhythmPosition%rhythm.intervals.length];
+    rhythmPosition++;
+    timer=window.setTimeout(()=>{nextGeneration(true);scheduleNextGeneration();},beats*60000/Number(bpmEl.value));
+  }
+  function start(){
+    if(running)return;running=true;rhythmPosition=0;playEl.textContent='■ 停止';ensureAudio();nextGeneration(true);scheduleNextGeneration();
+  }
+  function stop(){running=false;window.clearTimeout(timer);timer=null;playEl.textContent='▶ 再生';}
+  function resetTimer(){if(!running)return;window.clearTimeout(timer);scheduleNextGeneration();}
+  function renderLegend(){document.querySelector('#legend').innerHTML=LANES.map(x=>`<span class="chip"><i class="dot" style="background:${x.color}"></i>${x.name}</span>`).join('');}
+  window.addEventListener('pointerup',()=>drawing=false);
+  bpmEl.addEventListener('input',()=>{bpmNumber.textContent=bpmEl.value;resetTimer();});
+  rhythmEl.addEventListener('change',resetTimer);
+  volumeEl.addEventListener('input',()=>{if(master)master.gain.value=Number(volumeEl.value)/100*.35;});
+  playEl.addEventListener('click',()=>running?stop():start());
+  document.querySelector('#next').addEventListener('click',()=>nextGeneration(false));
+  document.querySelector('#applyPreset').addEventListener('click',()=>loadPreset(presetEl.value));
+  document.querySelector('#random').addEventListener('click',randomize);
+  document.querySelector('#clear').addEventListener('click',()=>{cells=emptyBoard();generation=0;render();});
+  renderLegend();createGrid();loadPreset('chaos');
+})();
+</script>
+</body>
+</html>
