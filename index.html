@@ -130,9 +130,12 @@
   function clearMessage(){
     messageEl.textContent='';
   }
+  function showPresetMessage(key){
+    messageEl.textContent=PRESETS[key].message;
+  }
   function loadPreset(key){
     const preset=PRESETS[key];
-    cells=emptyBoard();preset.apply(cells);generation=0;render();messageEl.textContent=preset.message;
+    cells=emptyBoard();preset.apply(cells);generation=0;render();
   }
   function randomize(){cells=emptyBoard();for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)cells[r][c]=Math.random()<.27;generation=0;render();clearMessage();}
   function ensureAudio(){
@@ -176,6 +179,7 @@
   volumeEl.addEventListener('input',()=>{if(master)master.gain.value=Number(volumeEl.value)/100*.35;});
   playEl.addEventListener('click',()=>running?stop():start());
   document.querySelector('#next').addEventListener('click',()=>nextGeneration(false));
+  presetEl.addEventListener('change',()=>{showPresetMessage(presetEl.value);});
   document.querySelector('#applyPreset').addEventListener('click',()=>loadPreset(presetEl.value));
   document.querySelector('#random').addEventListener('click',randomize);
   document.querySelector('#clear').addEventListener('click',()=>{cells=emptyBoard();generation=0;render();clearMessage();});
