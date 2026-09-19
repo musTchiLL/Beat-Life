@@ -81,7 +81,7 @@
   }
   const PRESETS={
     chaos:{message:'Rペントミノとドングリを十分離した、発散しやすいカオス配置。',apply(board){stamp(board,3,3,SHAPES.rPentomino);stamp(board,7,12,SHAPES.acorn);stamp(board,11,2,SHAPES.glider);}},
-    gliders:{message:'4つのグライダーが並走。',apply(board){stamp(board,1,1,SHAPES.glider);stamp(board,1,7,SHAPES.glider);stamp(board,1,13,SHAPES.glider);stamp(board,8,4,SHAPES.glider);}},
+    gliders:{message:'4つのグライダーが走行。',apply(board){stamp(board,1,1,SHAPES.glider);stamp(board,1,7,SHAPES.glider);stamp(board,1,13,SHAPES.glider);stamp(board,8,4,SHAPES.glider);}},
     oscillators:{message:'Clock II（p4）、ブリンカー、トード、ビーコンを観察できます。',apply(board){stamp(board,1,1,SHAPES.clockII);stamp(board,14,1,SHAPES.blinker);stamp(board,12,16,SHAPES.toad);stamp(board,1,15,SHAPES.beacon);}},
     pentadecathlon:{message:'ペンタデカスロン',apply(board){stamp(board,6,6,SHAPES.pentadecathlon);}},
     collision:{message:'グライダーと振動子が干渉する実験配置。',apply(board){stamp(board,2,2,SHAPES.glider);stamp(board,10,15,SHAPES.glider,2);stamp(board,6,9,SHAPES.toad);stamp(board,12,4,SHAPES.blinker,1);}}
